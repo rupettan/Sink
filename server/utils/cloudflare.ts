@@ -3,6 +3,12 @@ import type { Compilable } from 'kysely'
 
 export function useWAE(event: H3Event, query: Compilable) {
   const { cfAccountId, cfApiToken } = useRuntimeConfig(event)
+  
+  console.log('Sink Analytics Config:', {
+    hasAccountId: Boolean(cfAccountId),
+    hasApiToken: Boolean(cfApiToken),
+  })
+
   if (!cfAccountId || !cfApiToken)
     return { data: [] }
 
