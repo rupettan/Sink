@@ -4,41 +4,85 @@ import type { Compilable } from 'kysely'
 import { env as workerEnv } from 'cloudflare:workers'
 
 export function useWAE(event: H3Event, query: Compilable) {
-  // ① Nuxt Runtime Config
+  // Nuxtの実行時設定
   const config = useRuntimeConfig(event)
 
-  // ② H3 Cloudflare Context
+  // CloudflareのH3 Context
   const cfEnv = event.context.cloudflare?.env
 
-  // ③ Cloudflare Workers直接参照
-  const directEnv = workerEnv as unknown as Record<string, string | undefined>
+  // Cloudflare Workersの環境変数
+  const directEnv = workerEnv as unknown as
+    Record<string, unknown>
 
-  // 環境変数の取得状況を記録
-  // 値そのものはログに出力しない
+  // Bindingの名前を取得
+  // 値やAPIトークンは出力しない
+  let bindingNames: string[] = []
+
+  try {
+    bindingNames = Object.keys(directEnv)
+  }
+  catch {
+    console.warn(
+      'Sink: Failed to enumerate Worker bindings',
+    )
+  }
+
+  // 環境変数が存在するか確認
+  const runtimeAccount = Boolean(config.cfAccountId)
+  const runtimeToken = Boolean(config.cfApiToken)
+
+  const contextAccount =
+    Boolean(cfEnv?.NUXT_CF_ACCOUNT_ID)
+
+  const contextToken =
+    Boolean(cfEnv?.NUXT_CF_API_TOKEN)
+
+  const workerAccount =
+    Boolean(directEnv.NUXT_CF_ACCOUNT_ID)
+
+  const workerToken =
+    Boolean(directEnv.NUXT_CF_API_TOKEN)
+
+  // 診断ログ
   console.log('Sink Environment Check:', {
-    runtimeAccount: Boolean(config.cfAccountId),
-    runtimeToken: Boolean(config.cfApiToken),
-
-    contextAccount: Boolean(cfEnv?.NUXT_CF_ACCOUNT_ID),
-    contextToken: Boolean(cfEnv?.NUXT_CF_API_TOKEN),
-
-    workerAccount: Boolean(directEnv.NUXT_CF_ACCOUNT_ID),
-    workerToken: Boolean(directEnv.NUXT_CF_API_TOKEN),
+    runtimeAccount,
+    runtimeToken,
+    contextAccount,
+    contextToken,
+    workerAccount,
+    workerToken,
   })
 
-  // 取得できる環境から認証情報を取得
-  const cfAccountId
-    = directEnv.NUXT_CF_ACCOUNT_ID
-      || cfEnv?.NUXT_CF_ACCOUNT_ID
-      || config.cfAccountId
+  console.log('Available Worker Bindings:', {
+    names: bindingNames,
+    hasAccountId: Object.hasOwn(
+      directEnv,
+      'NUXT_CF_ACCOUNT_ID',
+    ),
+    hasApiToken: Object.hasOwn(
+      directEnv,
+      'NUXT_CF_API_TOKEN',
+    ),
+  })
 
-  const cfApiToken
-    = directEnv.NUXT_CF_API_TOKEN
-      || cfEnv?.NUXT_CF_API_TOKEN
-      || config.cfApiToken
+  // 環境変数を優先順位順に取得
+  const cfAccountId =
+    directEnv.NUXT_CF_ACCOUNT_ID
+    || cfEnv?.NUXT_CF_ACCOUNT_ID
+    || config.cfAccountId
 
-  // 認証情報が取得できなければ空データを返す
-  if (!cfAccountId || !cfApiToken) {
+  const cfApiToken =
+    directEnv.NUXT_CF_API_TOKEN
+    || cfEnv?.NUXT_CF_API_TOKEN
+    || config.cfApiToken
+
+  // 認証情報がない場合
+  if (
+    typeof cfAccountId !== 'string'
+    || typeof cfApiToken !== 'string'
+    || !cfAccountId
+    || !cfApiToken
+  ) {
     console.error(
       'Sink Analytics: Missing runtime credentials',
     )
@@ -46,23 +90,15 @@ export function useWAE(event: H3Event, query: Compilable) {
     return { data: [] }
   }
 
-  // 使用した取得方法をログに記録
-  console.log('Sink Analytics Credentials:', {
-    source: directEnv.NUXT_CF_ACCOUNT_ID
-      ? 'cloudflare:workers'
-      : cfEnv?.NUXT_CF_ACCOUNT_ID
-        ? 'cloudflare context'
-        : 'nuxt runtime config',
+  // 認証情報の取得成功
+  console.log('Sink Analytics: Credentials available')
 
-    hasAccountId: Boolean(cfAccountId),
-    hasApiToken: Boolean(cfApiToken),
-  })
-
-  // Analytics Engine用SQL生成
+  // SQLクエリを生成
   const compiledQuery = compileAnalyticsQuery(query)
 
-  if (import.meta.dev)
+  if (import.meta.dev) {
     console.info('useWAE', compiledQuery)
+  }
 
   // Cloudflare Analytics Engine SQL API
   return $fetch(
